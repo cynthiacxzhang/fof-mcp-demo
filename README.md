@@ -25,5 +25,6 @@ Longer term, the structured output from these tools — especially the trend dat
 
 ## Stack
 - [MCP](https://modelcontextprotocol.io) via `fastmcp`
-- DuckDB (stand-in for Trino)
+- DuckDB (stand-in for Hadoop/Spark/Hive/Trino)
 - Python 3.11+, uv
+- Railway + Anthropic for deployment and agent API
