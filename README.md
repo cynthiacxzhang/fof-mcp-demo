@@ -1,7 +1,7 @@
 # Flow-of-Funds MCP Server
 A demo MCP server that bridges an AI host with banking transaction data - schema introspection, SQL queries, and pre-built analytics tools over a Hadoop-style data lake.
 
-Deployed via Railway: fof-mcp-demo.up.railway.app 
+Deployed via Railway's PaaS: fof-mcp-demo.up.railway.app 
 
 ## The Challenge
 Flow analysis on financial data is still largely a manual process. Business teams and internal stakeholders are constantly trying to answer questions like “Where is money leaving to?”, “What’s the net outflow for this segment over Q4?”, or even “Is this metric actually a column in the dataset?” — often resorting to writing repetitive queries, waiting on results, and rinsing and repeating.
