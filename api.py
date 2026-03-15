@@ -10,7 +10,9 @@ from pathlib import Path
 from typing import AsyncGenerator
 
 import anthropic
-from fastapi import FastAPI
+import psycopg
+from psycopg.rows import dict_row
+from fastapi import FastAPI, Response
 from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel
 
@@ -19,11 +21,9 @@ import src.core.tools as tools_impl
 app = FastAPI(title="Flow of Funds Demo")
 
 client = anthropic.AsyncAnthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+DATABASE_URL = os.getenv("DATABASE_URL")
 
 MODEL = "claude-sonnet-4-6"
-
-# Per-session conversation history (in-memory, resets on server restart)
-SESSIONS: dict[str, list] = {}
 
 SYSTEM_PROMPT = """You are a flow-of-funds analyst assistant connected to a personal banking data lake.
 
@@ -145,6 +145,81 @@ TOOL_MAP = {
     "explain_pipeline":  lambda a: tools_impl.explain_pipeline(a["table_name"]),
 }
 
+_CREATE_TABLES_SQL = """
+CREATE TABLE IF NOT EXISTS sessions (
+    session_id  TEXT PRIMARY KEY,
+    title       TEXT NOT NULL DEFAULT 'Untitled',
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE TABLE IF NOT EXISTS messages (
+    session_id  TEXT PRIMARY KEY REFERENCES sessions(session_id) ON DELETE CASCADE,
+    messages    JSONB NOT NULL DEFAULT '[]'
+);
+"""
+
+
+# ---------------------------------------------------------------------------
+# DB helpers
+# ---------------------------------------------------------------------------
+
+async def _db() -> psycopg.AsyncConnection:
+    return await psycopg.AsyncConnection.connect(DATABASE_URL, row_factory=dict_row)
+
+
+@app.on_event("startup")
+async def startup():
+    if DATABASE_URL:
+        async with await _db() as conn:
+            await conn.execute(_CREATE_TABLES_SQL)
+            await conn.commit()
+
+
+async def _ensure_session(session_id: str, first_message: str) -> None:
+    title = first_message[:60] + ("…" if len(first_message) > 60 else "")
+    async with await _db() as conn:
+        await conn.execute(
+            "INSERT INTO sessions (session_id, title) VALUES (%s, %s) ON CONFLICT DO NOTHING",
+            (session_id, title),
+        )
+        await conn.execute(
+            "INSERT INTO messages (session_id, messages) VALUES (%s, '[]'::jsonb) ON CONFLICT DO NOTHING",
+            (session_id,),
+        )
+        await conn.commit()
+
+
+async def _load_messages(session_id: str) -> list:
+    async with await _db() as conn:
+        row = await (await conn.execute(
+            "SELECT messages FROM messages WHERE session_id = %s", (session_id,)
+        )).fetchone()
+    return row["messages"] if row else []
+
+
+async def _save_messages(session_id: str, messages: list) -> None:
+    async with await _db() as conn:
+        await conn.execute(
+            "UPDATE messages SET messages = %s::jsonb WHERE session_id = %s",
+            (json.dumps(messages), session_id),
+        )
+        await conn.execute(
+            "UPDATE sessions SET updated_at = NOW() WHERE session_id = %s",
+            (session_id,),
+        )
+        await conn.commit()
+
+
+async def _list_sessions() -> list[dict]:
+    async with await _db() as conn:
+        rows = await (await conn.execute(
+            "SELECT session_id, title, updated_at FROM sessions ORDER BY updated_at DESC LIMIT 50"
+        )).fetchall()
+    return [
+        {**r, "updated_at": r["updated_at"].isoformat()}
+        for r in rows
+    ]
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -169,10 +244,12 @@ async def run_tool(name: str, tool_input: dict) -> str:
 # ---------------------------------------------------------------------------
 
 async def agent_stream(message: str, session_id: str) -> AsyncGenerator[str, None]:
-    if session_id not in SESSIONS:
-        SESSIONS[session_id] = []
+    if DATABASE_URL:
+        await _ensure_session(session_id, message)
+        messages = await _load_messages(session_id)
+    else:
+        messages = []
 
-    messages = SESSIONS[session_id]
     messages.append({"role": "user", "content": message})
 
     try:
@@ -237,9 +314,10 @@ async def agent_stream(message: str, session_id: str) -> AsyncGenerator[str, Non
             messages.append({"role": "assistant", "content": final_msg.content})
 
             if final_msg.stop_reason == "end_turn":
+                if DATABASE_URL:
+                    await _save_messages(session_id, messages)
                 break
 
-            # Tool use — send results back and continue loop
             messages.append({
                 "role": "user",
                 "content": [
@@ -249,6 +327,8 @@ async def agent_stream(message: str, session_id: str) -> AsyncGenerator[str, Non
             })
 
     except anthropic.APIError as e:
+        if DATABASE_URL:
+            await _save_messages(session_id, messages)
         yield sse("error", message=str(e))
 
     yield sse("done")
@@ -264,12 +344,34 @@ class ChatRequest(BaseModel):
 
 
 @app.post("/chat")
-async def chat(request: ChatRequest):
+async def chat(request: ChatRequest, response: Response):
+    response.set_cookie(
+        key="session_id",
+        value=request.session_id,
+        max_age=60 * 60 * 24 * 30,
+        httponly=False,
+        samesite="lax",
+    )
     return StreamingResponse(
         agent_stream(request.message, request.session_id),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+@app.get("/sessions")
+async def list_sessions():
+    if not DATABASE_URL:
+        return []
+    return await _list_sessions()
+
+
+@app.get("/sessions/{session_id}/messages")
+async def get_session_messages(session_id: str):
+    if not DATABASE_URL:
+        return {"session_id": session_id, "messages": []}
+    msgs = await _load_messages(session_id)
+    return {"session_id": session_id, "messages": msgs}
 
 
 @app.get("/")

@@ -53,7 +53,8 @@
       display: flex;
       flex-direction: column;
       padding: 24px 20px;
-      gap: 28px;
+      gap: 16px;
+      overflow: hidden;
     }
 
     .brand {
@@ -117,7 +118,7 @@
     }
 
     .new-chat-btn {
-      margin-top: auto;
+      flex-shrink: 0;
       padding: 9px 14px;
       background: transparent;
       border: 1px solid var(--border);
@@ -135,6 +136,49 @@
       background: var(--surface-2);
       border-color: var(--tool-border);
     }
+
+    /* ── Conversation history ────────────────────────── */
+
+    .history-section {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      flex: 1;
+      overflow-y: auto;
+      min-height: 0;
+    }
+
+    .history-label {
+      font-size: 10.5px;
+      font-weight: 500;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      padding: 0 2px;
+      margin-bottom: 2px;
+      flex-shrink: 0;
+    }
+
+    .history-item {
+      padding: 7px 10px;
+      border-radius: var(--radius-sm);
+      font-size: 12.5px;
+      color: var(--text);
+      cursor: pointer;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      transition: background 0.12s;
+      background: transparent;
+      border: none;
+      text-align: left;
+      font-family: var(--sans);
+      width: 100%;
+      flex-shrink: 0;
+    }
+
+    .history-item:hover  { background: var(--surface-2); }
+    .history-item.active { background: var(--surface-2); font-weight: 500; }
 
     /* ── Main ────────────────────────────────────────── */
 
@@ -509,6 +553,12 @@
       </div>
     </div>
 
+    <div class="sidebar-divider"></div>
+
+    <div class="history-section" id="history-list">
+      <div class="history-label">Recent</div>
+    </div>
+
     <button class="new-chat-btn" onclick="newChat()">New conversation</button>
   </aside>
 
@@ -571,8 +621,13 @@
 <script>
   // ── State ────────────────────────────────────────────────────────────────
 
-  let sessionId  = crypto.randomUUID();
-  let isLoading  = false;
+  function getCookie(name) {
+    const match = document.cookie.match(new RegExp('(?:^|; )' + name + '=([^;]*)'));
+    return match ? decodeURIComponent(match[1]) : null;
+  }
+
+  let sessionId = getCookie('session_id') || crypto.randomUUID();
+  let isLoading = false;
 
   // Current assistant message elements
   let assistantContent = null;  // .assistant-content div
@@ -651,6 +706,87 @@
     el.dataset.raw = (el.dataset.raw || '') + chunk;
     el.innerHTML = renderMarkdown(el.dataset.raw);
     scrollBottom();
+  }
+
+  // ── History sidebar ──────────────────────────────────────────────────────
+
+  async function loadHistory() {
+    try {
+      const res  = await fetch('/sessions');
+      const list = await res.json();
+      const container = document.getElementById('history-list');
+      container.innerHTML = '<div class="history-label">Recent</div>';
+      for (const s of list) {
+        const btn = document.createElement('button');
+        btn.className = 'history-item' + (s.session_id === sessionId ? ' active' : '');
+        btn.textContent = s.title || 'Untitled';
+        btn.title = s.title;
+        btn.dataset.sid = s.session_id;
+        btn.onclick = () => loadSession(s.session_id);
+        container.appendChild(btn);
+      }
+    } catch (e) {
+      console.warn('Could not load history', e);
+    }
+  }
+
+  async function loadSession(id) {
+    if (isLoading) return;
+    sessionId = id;
+
+    document.querySelectorAll('.history-item').forEach(el => {
+      el.classList.toggle('active', el.dataset.sid === id);
+    });
+
+    const res  = await fetch(`/sessions/${id}/messages`);
+    const data = await res.json();
+    const inner = document.getElementById('messages-inner');
+    inner.innerHTML = '';
+
+    assistantContent = null;
+    currentTextEl    = null;
+    toolCards        = {};
+
+    for (const msg of (data.messages || [])) {
+      if (msg.role === 'user') {
+        if (typeof msg.content === 'string') addUserMessage(msg.content);
+      } else if (msg.role === 'assistant') {
+        addAssistantMessage();
+        if (Array.isArray(msg.content)) {
+          for (const block of msg.content) {
+            if (block.type === 'text') {
+              appendText(block.text);
+            } else if (block.type === 'tool_use') {
+              addHistoricToolCard(block.id, block.name, block.input);
+            }
+          }
+        }
+      }
+    }
+    scrollBottom();
+  }
+
+  function addHistoricToolCard(id, name, input) {
+    currentTextEl = null;
+    const card = document.createElement('div');
+    card.className = 'tool-card';
+    card.dataset.id = id;
+    card.innerHTML = `
+      <div class="tool-header" onclick="toggleCard(this.parentElement)">
+        <div class="tool-header-left">
+          <span class="tool-badge">${name}</span>
+          <span class="tool-status" style="font-size:12px;color:var(--text-muted)">done</span>
+        </div>
+        <span class="tool-toggle">▾</span>
+      </div>
+      <div class="tool-body">
+        <div class="tool-section">
+          <div class="tool-section-label">Input</div>
+          <div class="tool-code">${JSON.stringify(input, null, 2)}</div>
+        </div>
+      </div>`;
+    assistantContent.appendChild(card);
+    toolCards[id] = card;
   }
 
   // ── Tool cards ───────────────────────────────────────────────────────────
@@ -784,6 +920,7 @@
     }
 
     setLoading(false);
+    loadHistory();
   }
 
   function handleSend() {
@@ -801,6 +938,7 @@
 
   function newChat() {
     sessionId = crypto.randomUUID();
+    document.querySelectorAll('.history-item').forEach(el => el.classList.remove('active'));
     const inner = document.getElementById('messages-inner');
     inner.innerHTML = `
       <div class="starters" id="starters">
@@ -831,6 +969,10 @@
     currentTextEl    = null;
     toolCards        = {};
   }
+
+  // ── Init ─────────────────────────────────────────────────────────────────
+
+  loadHistory();
 
   // ── Input auto-resize + keyboard ─────────────────────────────────────────
 
