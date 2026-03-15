@@ -21,7 +21,8 @@ import src.core.tools as tools_impl
 app = FastAPI(title="Flow of Funds Demo")
 
 client = anthropic.AsyncAnthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-DATABASE_URL = os.getenv("DATABASE_URL")
+_raw_db_url = os.getenv("DATABASE_URL", "")
+DATABASE_URL = _raw_db_url.replace("postgres://", "postgresql://", 1) if _raw_db_url else None
 
 MODEL = "claude-sonnet-4-6"
 
@@ -145,20 +146,6 @@ TOOL_MAP = {
     "explain_pipeline":  lambda a: tools_impl.explain_pipeline(a["table_name"]),
 }
 
-_CREATE_TABLES_SQL = """
-CREATE TABLE IF NOT EXISTS sessions (
-    session_id  TEXT PRIMARY KEY,
-    title       TEXT NOT NULL DEFAULT 'Untitled',
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-CREATE TABLE IF NOT EXISTS messages (
-    session_id  TEXT PRIMARY KEY REFERENCES sessions(session_id) ON DELETE CASCADE,
-    messages    JSONB NOT NULL DEFAULT '[]'
-);
-"""
-
-
 # ---------------------------------------------------------------------------
 # DB helpers
 # ---------------------------------------------------------------------------
@@ -171,7 +158,20 @@ async def _db() -> psycopg.AsyncConnection:
 async def startup():
     if DATABASE_URL:
         async with await _db() as conn:
-            await conn.execute(_CREATE_TABLES_SQL)
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS sessions (
+                    session_id  TEXT PRIMARY KEY,
+                    title       TEXT NOT NULL DEFAULT 'Untitled',
+                    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+            """)
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS messages (
+                    session_id  TEXT PRIMARY KEY REFERENCES sessions(session_id) ON DELETE CASCADE,
+                    messages    JSONB NOT NULL DEFAULT '[]'
+                )
+            """)
             await conn.commit()
 
 
