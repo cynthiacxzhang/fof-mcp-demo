@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(gh auth:*)",
+      "Bash(gh repo:*)",
+      "Bash(uv add:*)",
+      "Bash(uv run:*)",
+      "Bash(git add:*)",
+      "Bash(git push:*)",
+      "Bash(git:*)",
+      "Bash(echo:*)"
+    ]
+  }
+}
