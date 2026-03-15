@@ -9,6 +9,8 @@ RUN pip install uv
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev
 
+ENV PATH="/app/.venv/bin:$PATH"
+
 COPY . .
 
 CMD ["uv", "run", "uvicorn", "api:app", "--host", "0.0.0.0", "--port", "8000"]
