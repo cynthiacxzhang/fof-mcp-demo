@@ -311,7 +311,7 @@ async def agent_stream(message: str, session_id: str) -> AsyncGenerator[str, Non
 
                 final_msg = await stream.get_final_message()
 
-            messages.append({"role": "assistant", "content": final_msg.content})
+            messages.append({"role": "assistant", "content": [b.model_dump() for b in final_msg.content]})
 
             if final_msg.stop_reason == "end_turn":
                 if DATABASE_URL:
