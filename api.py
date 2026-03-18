@@ -374,6 +374,16 @@ async def get_session_messages(session_id: str):
     return {"session_id": session_id, "messages": msgs}
 
 
+@app.delete("/sessions/{session_id}")
+async def delete_session(session_id: str):
+    if not DATABASE_URL:
+        return {"ok": True}
+    async with await _db() as conn:
+        await conn.execute("DELETE FROM sessions WHERE session_id = %s", (session_id,))
+        await conn.commit()
+    return {"ok": True}
+
+
 @app.get("/")
 async def index():
     return HTMLResponse(Path("static/index.html").read_text())

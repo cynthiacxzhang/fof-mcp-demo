@@ -180,6 +180,32 @@
     .history-item:hover  { background: var(--surface-2); }
     .history-item.active { background: var(--surface-2); font-weight: 500; }
 
+    .history-row {
+      display: flex;
+      align-items: center;
+      width: 100%;
+      border-radius: var(--radius-sm);
+      flex-shrink: 0;
+    }
+
+    .history-row:hover .history-delete { opacity: 1; }
+
+    .history-delete {
+      opacity: 0;
+      flex-shrink: 0;
+      background: none;
+      border: none;
+      cursor: pointer;
+      padding: 4px 6px;
+      color: var(--text-muted);
+      font-size: 13px;
+      line-height: 1;
+      border-radius: var(--radius-sm);
+      transition: opacity 0.12s, color 0.12s;
+    }
+
+    .history-delete:hover { color: var(--text); }
+
     /* ── Main ────────────────────────────────────────── */
 
     .main {
@@ -717,16 +743,40 @@
       const container = document.getElementById('history-list');
       container.innerHTML = '<div class="history-label">Recent</div>';
       for (const s of list) {
+        const row = document.createElement('div');
+        row.className = 'history-row';
+
         const btn = document.createElement('button');
         btn.className = 'history-item' + (s.session_id === sessionId ? ' active' : '');
         btn.textContent = s.title || 'Untitled';
         btn.title = s.title;
         btn.dataset.sid = s.session_id;
+        btn.style.flex = '1';
         btn.onclick = () => loadSession(s.session_id);
-        container.appendChild(btn);
+
+        const del = document.createElement('button');
+        del.className = 'history-delete';
+        del.textContent = '×';
+        del.title = 'Delete';
+        del.onclick = (e) => {
+          e.stopPropagation();
+          deleteSession(s.session_id, row);
+        };
+
+        row.appendChild(btn);
+        row.appendChild(del);
+        container.appendChild(row);
       }
     } catch (e) {
       console.warn('Could not load history', e);
+    }
+  }
+
+  async function deleteSession(id, rowEl) {
+    await fetch(`/sessions/${id}`, { method: 'DELETE' });
+    rowEl.remove();
+    if (sessionId === id) {
+      newChat();
     }
   }
 
