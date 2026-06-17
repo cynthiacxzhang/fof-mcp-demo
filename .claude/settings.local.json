@@ -8,7 +8,10 @@
       "Bash(git add:*)",
       "Bash(git push:*)",
       "Bash(git:*)",
-      "Bash(echo:*)"
+      "Bash(echo:*)",
+      "Bash(curl:*)",
+      "Bash(uv lock:*)",
+      "Bash(grep -rn \"parsed_output\\\\|model_dump\\\\|ContentBlock\\\\|serialize\" /Users/Cynthia/fof-mcp-demo --include=*.py --exclude-dir=.venv)"
     ]
   }
 }
